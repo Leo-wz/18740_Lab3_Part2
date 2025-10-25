@@ -16,7 +16,18 @@ class MsiCache : public CoherentCacheBase {
     MsiCache(const MsiCacheParams &params);
 
     // your cache storage, state machine etc here. See MiCache for reference.
-   
+    // MSI has 3 valid states
+    enum class MsiState {
+        Invalid,
+        Modified,
+        Shared,
+        Error
+    } state = MsiState::Invalid;
+
+    unsigned char data = 0;
+    long tag = 0;
+    bool dirty = false;
+
     void handleCoherentCpuReq(PacketPtr pkt) override;
     void handleCoherentBusGrant() override;
     void handleCoherentMemResp(PacketPtr pkt) override;
