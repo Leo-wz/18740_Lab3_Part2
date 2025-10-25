@@ -8,7 +8,7 @@ MsiCache::MsiCache(const MsiCacheParams& params)
 : CoherentCacheBase(params) {}
 
 bool MsiCache::isHit(long addr) {
-    return (state == MiState::Modified || state == MiState::Shared) && tag == addr;
+    return (state == MsiState::Modified || state == MsiState::Shared) && tag == addr;
 }
 
 void MsiCache::allocate(long addr) {
@@ -26,7 +26,7 @@ void MsiCache::handleCoherentCpuReq(PacketPtr pkt) {
     bool cacheHit = isHit(addr);
 
     if (cacheHit) {
-        assert(state == MiState::Modified || state == MiState::Shared);
+        assert(state == MsiState::Modified || state == MsiState::Shared);
         
         pkt->makeResponse();
 
@@ -39,10 +39,10 @@ void MsiCache::handleCoherentCpuReq(PacketPtr pkt) {
         } else {
             DPRINTF(CCache, "Mi[%d] M write hit %#x\n\n", cacheId, addr);
             // Case: State == Shared
-            if (state == MiState::Shared) {
+            if (state == MsiState::Shared) {
                 // evict block, cause writeback if dirty
                 evict();
-                state == MiState::Modified; // Upgrade to M
+                state == MsiState::Modified; // Upgrade to M
             }
             // TODO: Upgrade?
             // Case: State == Modified
@@ -64,16 +64,70 @@ void MsiCache::handleCoherentCpuReq(PacketPtr pkt) {
 void MsiCache::handleCoherentBusGrant() {
     DPRINTF(CCache, "Msi[%d] bus granted\n\n", cacheId);
     // your implementation here. See MiCache for reference.
+    bool isRead = requestPacket->isRead();
+    if (isRead) {
+        bus->sendMemReq(requestPacket, true);
+    } else {
+        bus->sendMemReq(requestPacket, false);
+    }
 }
 
 void MsiCache::handleCoherentMemResp(PacketPtr pkt) {
     DPRINTF(CCache, "Msi[%d] mem resp: %s\n", cacheId, pkt->print());
     // your implementation here. See MiCache for reference.
+    // In MSI, mem req can hit in both S and M
+    assert(!isHit(pkt->getAddr()));
+
+    // since this happened on miss, evict old block
+    // Potentially sends a writeback to memory.
+    evict();
+
+    // allocate new
+    allocate(pkt->getAddr());
+
+    bool isRead = pkt->isRead();
+    if (isRead) {
+        state = MiState::Shared;
+        data = *pkt->getPtr<unsigned char>();
+        DPRINTF(CCache, "Mi[%d] got data %d from read\n\n", cacheId, data);
+    } else {
+        state = MiState::Modified;
+        // do not read data from a write response packet. Use stored value.
+        DPRINTF(CCache, "Mi[%d] storing %d in cache\n\n", cacheId, dataToWrite);
+        data = dataToWrite;
+
+        // update dirty bit
+        dirty = true;
+    }
+    // the CPU has been waiting for a response. Send it this one.
+    sendCpuResp(pkt);
+    
+    // release the bus so other caches can use it
+    bus->release(cacheId);
+
+    // start accepting new requests
+    blocked = false;
 }
 
 void MsiCache::handleCoherentSnoopedReq(PacketPtr pkt) {
     DPRINTF(CCache, "Msi[%d] snoop: %s\n", cacheId, pkt->print());
     // your implementation here. See MiCache for reference.
+    bool snoopHit = isHit(pkt->getAddr());
+
+    // cache snooped a request on the shared bus. Update internal state if needed.
+    // only need to care about snoop hit on M
+    if (snoopHit) {
+        assert((state == MsiState::Modified || state == MsiState::Shared));
+        DPRINTF(CCache, "Mi[%d] snoop hit! invalidate\n\n", cacheId);
+
+        // evict block, cause writeback if dirty
+        evict();
+
+        // invalidate
+        state = MiState::Invalid;
+    } else {
+        DPRINTF(CCache, "Mi[%d] snoop miss! nothing to do\n\n", cacheId);
+    }
 }
 
 
