@@ -25,6 +25,7 @@ void MiCache::evict() {
     if ((state == MiState::Modified) && dirty) {
         dirty = false;
         state = MiState::Invalid;
+        bus->sendWriteback(cacheId, tag, data);
         DPRINTF(CCache, "Mi[%d] writeback %#x, %d\n\n", cacheId, tag, data);
         
     }

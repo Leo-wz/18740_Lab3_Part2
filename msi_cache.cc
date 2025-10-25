@@ -7,6 +7,17 @@ namespace gem5 {
 MsiCache::MsiCache(const MsiCacheParams& params) 
 : CoherentCacheBase(params) {}
 
+bool MsiCache::isHit(long addr) {
+    if (state == MsiState::Modified && tag == addr)
+    || (state == MsiState::Shared && tag == addr) {
+        return true;
+    } else return false;
+}
+
+void MsiCache::allocate(long addr) {
+    tag = addr;
+    dirty = false;
+}
 
 void MsiCache::handleCoherentCpuReq(PacketPtr pkt) {
     DPRINTF(CCache, "Msi[%d] cpu req: %s\n\n", cacheId, pkt->print());
