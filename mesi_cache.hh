@@ -16,7 +16,24 @@ class MesiCache : public CoherentCacheBase {
     MesiCache(const MesiCacheParams &params);
 
     // coherence state machine, data storage etc. here
+    enum class MesiState {
+        Modified,
+        Exclusive,
+        Shared,
+        Invalid,
+        Error
+    } state = MesiState::Invalid;
     
+    unsigned char data = 0;
+    long tag = 0;
+    bool dirty = false;
+
+    unsigned char dataToWrite = 0;
+
+    bool isHit(long addr);
+    void allocate(long addr);
+    void evict();
+
     void handleCoherentCpuReq(PacketPtr pkt) override;
     void handleCoherentBusGrant() override;
     void handleCoherentMemResp(PacketPtr pkt) override;
