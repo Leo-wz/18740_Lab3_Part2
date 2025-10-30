@@ -38,14 +38,14 @@ void MsiCache::handleCoherentCpuReq(PacketPtr pkt) {
     if (cacheHit) {
         assert(state == MsiState::Modified || state == MsiState::Shared);
         if (isRead) {
-            DPRINTF(CCache, "Mi[%d] M read hit %#x\n\n", cacheId, addr);
+            DPRINTF(CCache, "Msi[%d] M read hit %#x\n\n", cacheId, addr);
             pkt->makeResponse();
             // set response data to cached value. This will be returned to CPU.
             pkt->setData(&data);
             sendCpuResp(pkt);
             blocked = false;
         } else {
-            DPRINTF(CCache, "Mi[%d] M write hit %#x\n\n", cacheId, addr);
+            DPRINTF(CCache, "Msi[%d] M write hit %#x\n\n", cacheId, addr);
             dirty = true;
             if (state == MsiState::Modified) {
                 // this cache already has the line in M, so must be exclusive, no need to send to snoop bus.
@@ -64,7 +64,7 @@ void MsiCache::handleCoherentCpuReq(PacketPtr pkt) {
             }
         }
     } else { // Cache miss
-        DPRINTF(CCache, "Mi[%d] cache miss %#x\n\n", cacheId, addr);
+        DPRINTF(CCache, "Msi[%d] cache miss %#x\n\n", cacheId, addr);
         requestPacket = pkt;
         if (pkt->isWrite()) {
             dataToWrite = *pkt->getPtr<unsigned char>();
