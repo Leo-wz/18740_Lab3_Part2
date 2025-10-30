@@ -18,19 +18,32 @@ void MsiCache::allocate(long addr) {
 
 void MsiCache::evict() {
     // TODO: if line is Modified and dirty, write back dirty data.
-    if ((state == MsiState::Modified) && dirty) {
-        dirty = false;
-        state = MsiState::Invalid;
-        bus->sendWriteback(cacheId, tag, data);
-        DPRINTF(CCache, "Mi[%d] writeback %#x, %d\n\n", cacheId, tag, data);
+    // DPRINTF(CCache, "Msi[%d] bus is blocked: %s dirty: %s\n\n", cacheId, blocked, dirty);
+    // dirty = false;
+    // state = MsiState::Invalid;
+    // bus->sendWriteback(cacheId, tag, data);
+    // DPRINTF(CCache, "Msi[%d] writeback %#x, %d\n\n", cacheId, tag, data);
         
-    }
+    dirty = false;
+    state = MsiState::Invalid;
+    bus->sendWriteback(cacheId, tag, data);
+    DPRINTF(CCache, "Msi[%d] writeback %#x, %d\n\n", cacheId, tag, data);
+    // if (dirty) {
+    //     dirty = false;
+    //     state = MsiState::Invalid;
+    //     bus->sendWriteback(cacheId, tag, data);
+    //     DPRINTF(CCache, "Msi[%d] writeback %#x, %d\n\n", cacheId, tag, data);
+    // }
 }
 
 void MsiCache::handleCoherentCpuReq(PacketPtr pkt) {
-    DPRINTF(CCache, "Msi[%d] cpu req: %s\n\n", cacheId, pkt->print());
-    // your implementation here. See MiCache for reference.
+    char *mystate;
+    if (state == MsiState::Modified) {mystate = "M";}
+    else if (state == MsiState::Shared) {mystate = "S";}
+    else if (state == MsiState::Invalid) {mystate = "I";}
+    DPRINTF(CCache, "Msi[%d] cpu req: %s state: %s \n\n", cacheId, pkt->print(), mystate);
     blocked = true; // stop accepting new reqs from CPU until this one is done
+    // your implementation here. See MiCache for reference.
 
     long addr = pkt->getAddr();
     bool isRead = pkt->isRead();
@@ -43,15 +56,16 @@ void MsiCache::handleCoherentCpuReq(PacketPtr pkt) {
 
 
         if (isRead) {
-            DPRINTF(CCache, "Mi[%d] M read hit %#x\n\n", cacheId, addr);
+            DPRINTF(CCache, "Msi[%d] read hit %#x\n\n", cacheId, addr);
             // set response data to cached value. This will be returned to CPU.
             pkt->setData(&data);
 
         } else {
-            DPRINTF(CCache, "Mi[%d] M write hit %#x\n\n", cacheId, addr);
+            DPRINTF(CCache, "Msi[%d] write hit %#x\n\n", cacheId, addr);
             // Case: State == Shared
             if (state == MsiState::Shared) {
                 // evict block, cause writeback if dirty
+                DPRINTF(CCache, "Msi[%d] Right before calling evict\n\n", cacheId);
                 evict();
                 state = MsiState::Modified; // Upgrade to M
             }
@@ -61,6 +75,7 @@ void MsiCache::handleCoherentCpuReq(PacketPtr pkt) {
             // this cache already has the line in M, so must be exclusive, no need to send to snoop bus.
             // writeback cache: no need to send to memory, just update cache data using packet data.
             data = *pkt->getPtr<unsigned char>();
+            DPRINTF(CCache, "Msi[%d] updating to %d in cache\n\n", cacheId, data);
 
         }
         // return the response packet to CPU
@@ -69,7 +84,7 @@ void MsiCache::handleCoherentCpuReq(PacketPtr pkt) {
         // start accepting new requests
         blocked = false;
     } else {
-        DPRINTF(CCache, "Mi[%d] cache miss %#x\n\n", cacheId, addr);
+        DPRINTF(CCache, "Msi[%d] cache miss %#x\n\n", cacheId, addr);
         // cache needs to do a memory request for both read and write
         // so that other caches can snoop it since it is allocating a new block.
 
@@ -120,11 +135,11 @@ void MsiCache::handleCoherentMemResp(PacketPtr pkt) {
     if (isRead) {
         state = MsiState::Shared;
         data = *pkt->getPtr<unsigned char>();
-        DPRINTF(CCache, "Mi[%d] got data %d from read\n\n", cacheId, data);
+        DPRINTF(CCache, "Msi[%d] got data %d from read\n\n", cacheId, data);
     } else {
         state = MsiState::Modified;
         // do not read data from a write response packet. Use stored value.
-        DPRINTF(CCache, "Mi[%d] storing %d in cache\n\n", cacheId, dataToWrite);
+        DPRINTF(CCache, "Msi[%d] storing %d in cache\n\n", cacheId, dataToWrite);
         data = dataToWrite;
 
         // update dirty bit
@@ -149,11 +164,14 @@ void MsiCache::handleCoherentSnoopedReq(PacketPtr pkt) {
     // only need to care about snoop hit on M
     if (snoopHit) {
         assert((state == MsiState::Modified || state == MsiState::Shared));
-        DPRINTF(CCache, "Mi[%d] snoop hit! \n\n", cacheId);
+        DPRINTF(CCache, "Msi[%d] snoop hit! \n\n", cacheId);
 
         // if state is M, or state is M and Write, evict and invalidate
-        if (state == MsiState::Modified || (state == MsiState::Shared && !requestPacket->isRead())) {
+        // DPRINTF(CCache, "Msi[%d] Right before the if \n\n", cacheId);
+        if (state == MsiState::Modified || (state == MsiState::Shared && !pkt->isRead())) {
+            DPRINTF(CCache, "Msi[%d] Right before calling evict \n\n", cacheId);
             evict();
+            // DPRINTF(CCache, "Msi[%d] Right after calling evict \n\n", cacheId);
             // invalidate
             state = MsiState::Invalid;
 
@@ -161,7 +179,7 @@ void MsiCache::handleCoherentSnoopedReq(PacketPtr pkt) {
 
         
     } else {
-        DPRINTF(CCache, "Mi[%d] snoop miss! nothing to do\n\n", cacheId);
+        DPRINTF(CCache, "Msi[%d] snoop miss! nothing to do\n\n", cacheId);
     }
 }
 

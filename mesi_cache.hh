@@ -27,6 +27,7 @@ class MesiCache : public CoherentCacheBase {
     unsigned char data = 0;
     long tag = 0;
     bool dirty = false;
+    bool isShared = false;
 
     unsigned char dataToWrite = 0;
 
