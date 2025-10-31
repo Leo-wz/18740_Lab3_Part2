@@ -9,14 +9,14 @@ MesiCache::MesiCache(const MesiCacheParams& params)
 
 bool MesiCache::isHit(long addr) {
     return (state == MesiState::Modified 
-         || state == MesiState::Shared 
+         || state == MesiState::Shared
          || state == MesiState::Exclusive) 
          && tag == addr;
 }
 
 void MesiCache::allocate(long addr) {
     tag = addr;
-    dirty = false; // TODO: Do I even need the dirty bit?
+    dirty = false;
 }
 
 void MesiCache::evict() {
@@ -30,7 +30,12 @@ void MesiCache::evict() {
 }
 
 void MesiCache::handleCoherentCpuReq(PacketPtr pkt) {
-    DPRINTF(CCache, "Mesi[%d] cpu req: %s\n\n", cacheId, pkt->print());
+    char *mystate;
+    if (state == MesiState::Modified)       {mystate = "M";}
+    else if (state == MesiState::Exclusive) {mystate = "E";}
+    else if (state == MesiState::Shared)    {mystate = "S";}
+    else if (state == MesiState::Invalid)   {mystate = "I";}
+    DPRINTF(CCache, "Mesi[%d] cpu req: %s current state: %s\n\n", cacheId, pkt->print(), mystate);
     // your implementation here. See MiCache/MsiCache for reference.
     blocked = true; // stop accepting new reqs from CPU until this one is done
     long addr = pkt->getAddr();
@@ -39,13 +44,13 @@ void MesiCache::handleCoherentCpuReq(PacketPtr pkt) {
     if (cacheHit) {
         assert(state != MesiState::Invalid);
         if (isRead) {
-            DPRINTF(CCache, "Mesi[%d] M read hit %#x\n\n", cacheId, addr);
+            DPRINTF(CCache, "Mesi[%d] read hit %#x\n\n", cacheId, addr);
             pkt->makeResponse();
             pkt->setData(&data);
             sendCpuResp(pkt);
             blocked = false;
         } else { // Is write
-            DPRINTF(CCache, "Mesi[%d] M write hit %#x\n\n", cacheId, addr);
+            DPRINTF(CCache, "Mesi[%d] write hit %#x\n\n", cacheId, addr);
             dirty = true;
             if (state == MesiState::Modified) {
                 data = *pkt->getPtr<unsigned char>();
@@ -77,6 +82,7 @@ void MesiCache::handleCoherentCpuReq(PacketPtr pkt) {
         }
         // request bus access
         // this will lead to handleCoherentBusGrant() being called eventually
+        if (state == MesiState::Modified) evict();
         bus->request(cacheId);
     }
 }
@@ -102,7 +108,8 @@ void MesiCache::handleCoherentMemResp(PacketPtr pkt) {
     bool isRead = pkt->isRead();
     
     if (isRead) {
-        if (isShared) {
+        DPRINTF(CCache, "Mesi[%d] isShared?: %d\n", cacheId, isShared);
+        if (pkt->hasSharers()) {
             state = MesiState::Shared;
         } else {
             state = MesiState::Exclusive;
@@ -112,6 +119,7 @@ void MesiCache::handleCoherentMemResp(PacketPtr pkt) {
     }
     else {
         DPRINTF(CCache, "Mesi[%d] storing %d in cache\n\n", cacheId, dataToWrite);
+        state = MesiState::Modified;
         data = dataToWrite;
         // update dirty bit
         dirty = true;
@@ -133,6 +141,7 @@ void MesiCache::handleCoherentSnoopedReq(PacketPtr pkt) {
 
     if (snoopHit) {
         DPRINTF(CCache, "Mesi[%d] snoop hit!\n\n", cacheId);
+        if (pkt->isRead()) pkt->setHasSharers();
         if (state == MesiState::Modified) {
             evict();
             if (pkt->isRead()) {
