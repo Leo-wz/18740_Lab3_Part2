@@ -30,12 +30,7 @@ void MesiCache::evict() {
 }
 
 void MesiCache::handleCoherentCpuReq(PacketPtr pkt) {
-    char *mystate;
-    if (state == MesiState::Modified)       {mystate = "M";}
-    else if (state == MesiState::Exclusive) {mystate = "E";}
-    else if (state == MesiState::Shared)    {mystate = "S";}
-    else if (state == MesiState::Invalid)   {mystate = "I";}
-    DPRINTF(CCache, "Mesi[%d] cpu req: %s current state: %s\n\n", cacheId, pkt->print(), mystate);
+    DPRINTF(CCache, "Mesi[%d] cpu req: %s\n\n", cacheId, pkt->print());
     // your implementation here. See MiCache/MsiCache for reference.
     blocked = true; // stop accepting new reqs from CPU until this one is done
     long addr = pkt->getAddr();
@@ -44,6 +39,7 @@ void MesiCache::handleCoherentCpuReq(PacketPtr pkt) {
     if (cacheHit) {
         assert(state != MesiState::Invalid);
         if (isRead) {
+            // Read hit, directly return
             DPRINTF(CCache, "Mesi[%d] read hit %#x\n\n", cacheId, addr);
             pkt->makeResponse();
             pkt->setData(&data);
@@ -52,6 +48,7 @@ void MesiCache::handleCoherentCpuReq(PacketPtr pkt) {
         } else { // Is write
             DPRINTF(CCache, "Mesi[%d] write hit %#x\n\n", cacheId, addr);
             dirty = true;
+            // Directly modify the data
             if (state == MesiState::Modified) {
                 data = *pkt->getPtr<unsigned char>();
                 pkt->makeResponse();
@@ -65,12 +62,13 @@ void MesiCache::handleCoherentCpuReq(PacketPtr pkt) {
                 bus->request(cacheId); // Invalidate other cache
                 state = MesiState::Modified; // Upgrade to M
             } else if (state == MesiState::Exclusive) {
+                // No invalidation required
                 data = *pkt->getPtr<unsigned char>();
                 pkt->makeResponse();
                 // return the response packet to CPU
                 sendCpuResp(pkt);
                 // start accepting new requests
-                state = MesiState::Modified; // Change to M
+                state = MesiState::Modified; // Upgrade to M
                 blocked = false;
             }
         }
@@ -82,7 +80,7 @@ void MesiCache::handleCoherentCpuReq(PacketPtr pkt) {
         }
         // request bus access
         // this will lead to handleCoherentBusGrant() being called eventually
-        if (state == MesiState::Modified) evict();
+        if (state == MesiState::Modified) evict(); // Evict old cache lines if M
         bus->request(cacheId);
     }
 }
@@ -108,8 +106,7 @@ void MesiCache::handleCoherentMemResp(PacketPtr pkt) {
     bool isRead = pkt->isRead();
     
     if (isRead) {
-        DPRINTF(CCache, "Mesi[%d] isShared?: %d\n", cacheId, isShared);
-        if (pkt->hasSharers()) {
+        if (pkt->hasSharers()) { // Check if shared
             state = MesiState::Shared;
         } else {
             state = MesiState::Exclusive;
@@ -144,6 +141,7 @@ void MesiCache::handleCoherentSnoopedReq(PacketPtr pkt) {
         if (pkt->isRead()) pkt->setHasSharers();
         if (state == MesiState::Modified) {
             evict();
+            // Downgrade based on request type
             if (pkt->isRead()) {
                 state = MesiState::Shared;
             } else {
@@ -151,11 +149,12 @@ void MesiCache::handleCoherentSnoopedReq(PacketPtr pkt) {
             }
         }
         else if (state == MesiState::Shared && !pkt->isRead()) {
-            evict();
             // invalidate
+            evict();
             state = MesiState::Invalid;
         } 
         else if (state == MesiState::Exclusive) {
+            // Downgrade based on request type
             if (pkt->isRead()) {
                 state = MesiState::Shared;
             }
